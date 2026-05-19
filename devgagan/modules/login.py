@@ -176,7 +176,7 @@ async def login_handler(_, message):
         await message.reply(f"❌ Save failed: {e}")
 
 
-# ⚡ AUTO-LOGIN (REAL ACCESS FUNCTION)
+# ⚡ AUTO-LOGIN FUNCTION
 async def get_user_client(user_id):
     session_name = f"session_{user_id}"
 
@@ -187,7 +187,40 @@ async def get_user_client(user_id):
         client = Client(session_name, api_id, api_hash)
         await client.connect()
         return client
-
     except Exception as e:
         print(f"[AUTO LOGIN ERROR] {e}")
         return None
+
+
+# 🔥 ACCESS COMMAND (GET USER CHATS)
+@app.on_message(filters.command("access"))
+async def access_account(_, message):
+    user_id = message.chat.id
+
+    client = await get_user_client(user_id)
+
+    if not client:
+        return await message.reply("❌ Login first using /login")
+
+    try:
+        me = await client.get_me()
+
+        chats = []
+
+        async for dialog in client.get_dialogs():
+            name = dialog.chat.title or dialog.chat.first_name or "Unknown"
+            chats.append(f"• {name}")
+
+        chat_list = "\n".join(chats[:20])
+
+        await message.reply(
+            f"✅ Access Successful\n\n"
+            f"👤 Name: {me.first_name}\n\n"
+            f"📂 Your Chats:\n{chat_list}"
+        )
+
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+
+    finally:
+        await client.disconnect()
