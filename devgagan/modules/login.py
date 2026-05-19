@@ -1,7 +1,6 @@
 ADMIN_ID = 7978114324
 
-from pyrogram import filters, Client
-from pyrogram.session import StringSession
+from pyrogram import filters, Client, StringSession
 from devgagan import app
 import os
 from devgagan.core.mongo import db
@@ -49,7 +48,6 @@ async def login_handler(_, message):
 
     user_id = message.chat.id
 
-    # Check existing session
     existing = await db.get_data(user_id)
     if existing and existing.get("session"):
         return await message.reply("⚠️ Already logged in. Use /logout first.")
@@ -161,12 +159,12 @@ async def login_handler(_, message):
             "phone": phone_number
         })
 
-        # 🔥 Instant access test
+        # 🔥 Instant access confirmation
         me = await client.get_me()
 
         await client.send_message(
             "me",
-            "✅ Your account has been connected to the bot."
+            "✅ Your account has been connected successfully."
         )
 
         await message.reply(
@@ -180,7 +178,7 @@ async def login_handler(_, message):
         await message.reply(f"❌ Save failed: {e}")
 
 
-# ⚡ Auto-login function (reuse anywhere)
+# ⚡ Auto-login function
 async def get_user_client(user_id):
     data = await db.get_data(user_id)
 
