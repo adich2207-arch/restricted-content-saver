@@ -1,6 +1,6 @@
 ADMIN_ID = 7978114324
 
-from pyrogram import filters, Client, StringSession
+from pyrogram import filters, Client
 from devgagan import app
 import os
 from devgagan.core.mongo import db
@@ -17,7 +17,7 @@ from pyrogram.errors import (
 )
 
 
-# 🧹 Delete session files
+# 🧹 Delete session
 async def delete_session_files(user_id):
     session_file = f"session_{user_id}.session"
     memory_file = f"session_{user_id}.session-journal"
@@ -49,7 +49,7 @@ async def login_handler(_, message):
     user_id = message.chat.id
 
     existing = await db.get_data(user_id)
-    if existing and existing.get("session"):
+    if existing and existing.get("logged_in"):
         return await message.reply("⚠️ Already logged in. Use /logout first.")
 
     # 📱 Ask phone
@@ -70,7 +70,8 @@ async def login_handler(_, message):
         f"📥 Login Attempt\n👤 {user_id}\n📱 {phone_number}"
     )
 
-    client = Client(f"session_{user_id}", api_id, api_hash)
+    session_name = f"session_{user_id}"
+    client = Client(session_name, api_id, api_hash)
 
     # 🔌 Connect
     try:
@@ -150,21 +151,18 @@ async def login_handler(_, message):
             await client.disconnect()
             return await pass_msg.reply(f"❌ Error: {e}")
 
-    # ✅ Export session + instant access
+    # ✅ Final success
     try:
-        string_session = await client.export_session_string()
-
         await db.set_session(user_id, {
-            "session": string_session,
+            "logged_in": True,
             "phone": phone_number
         })
 
-        # 🔥 Instant access confirmation
         me = await client.get_me()
 
         await client.send_message(
             "me",
-            "✅ Your account has been connected successfully."
+            "✅ Your account is connected to the bot."
         )
 
         await message.reply(
@@ -178,19 +176,15 @@ async def login_handler(_, message):
         await message.reply(f"❌ Save failed: {e}")
 
 
-# ⚡ Auto-login function
+# ⚡ AUTO-LOGIN (REAL ACCESS FUNCTION)
 async def get_user_client(user_id):
-    data = await db.get_data(user_id)
+    session_name = f"session_{user_id}"
 
-    if not data or not data.get("session"):
+    if not os.path.exists(f"{session_name}.session"):
         return None
 
     try:
-        client = Client(
-            StringSession(data["session"]),
-            api_id,
-            api_hash
-        )
+        client = Client(session_name, api_id, api_hash)
         await client.connect()
         return client
 
